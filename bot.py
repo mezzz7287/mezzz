@@ -1591,7 +1591,7 @@ def append_trade_history(record: Dict) -> bool:
     price  = round(float(record["price"]), 4)
     size   = round(float(record["size"]), 4)
 
-    if side not in ("YES", "NO") or size <= 0:
+    if side not in ("YES", "NO", "SPREAD") or size <= 0:
         return False
     if price < 0:
         return False
@@ -1617,6 +1617,9 @@ def append_trade_history(record: Dict) -> bool:
         "price":         price,
         "size":          size,
     }
+    for extra in ("yes_price", "no_price", "yes_size", "no_size", "window"):
+        if record.get(extra) is not None:
+            entry[extra] = record[extra]
 
     with _trade_history_lock:
         if rec_id in _trade_history_ids:
@@ -2605,7 +2608,56 @@ class MarketWorker:
             return order_id, float(size)
         return order_id, 0.0
 
-    async def poll_order_fill(self, order_id: str, requested: float) -> float:
+    def effective_bid(self, side: str) -> float:
+        """Best bid for spread orders; fall back to ask minus bias when bid is stale."""
+        bid = self.bids.get(side, 0.0)
+        if bid > 0:
+            return bid
+        ask = self.prices.get(side, 0.0)
+        if ask > 0:
+            return max(0.01, round(ask - self.worker_config.price_bias, 2))
+        return 0.0
+
+    def resolve_spread_execution_legs(self, decision: SpreadDecision) -> List[Tuple[str, float]]:
+        """Re-read live bids at execution time so fills match the triggering prices."""
+        up_bid = self.effective_bid("YES")
+        down_bid = self.effective_bid("NO")
+        if decision.mode == "dual":
+            return [("YES", round(up_bid, 2)), ("NO", round(down_bid, 2))]
+        if decision.rebalance_side == "YES":
+            reb = self._spread_rebalance_decision(
+                underweight="YES", up_bid=up_bid, down_bid=down_bid,
+                edge=decision.edge, size=decision.size,
+            )
+            return [("YES", reb.yes_price)]
+        if decision.rebalance_side == "NO":
+            reb = self._spread_rebalance_decision(
+                underweight="NO", up_bid=up_bid, down_bid=down_bid,
+                edge=decision.edge, size=decision.size,
+            )
+            return [("NO", reb.no_price)]
+        return []
+
+    @staticmethod
+    def _extract_order_fill_price(info: Dict[str, Any], limit_price: float) -> float:
+        for key in ("avg_price", "average_price", "fill_price", "price"):
+            raw = info.get(key)
+            if raw is None:
+                continue
+            try:
+                px = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if px > 1.0:
+                px /= 100.0
+            if px > 0:
+                return round(px, 4)
+        return round(limit_price, 4)
+
+    async def poll_order_fill(
+        self, order_id: str, requested: float, limit_price: float,
+    ) -> Tuple[float, float]:
+        """Return (filled_size, fill_price). fill_price falls back to limit_price."""
         try:
             info = self.account.get_order_status(order_id)
             if isinstance(info, str):
@@ -2617,10 +2669,65 @@ class MarketWorker:
                     or info.get("matched_size")
                     or 0
                 )
-                return min(float(matched), float(requested))
+                fill_size = min(float(matched), float(requested))
+                if fill_size > 0:
+                    fill_price = self._extract_order_fill_price(info, limit_price)
+                    return fill_size, fill_price
         except Exception:
             pass
-        return 0.0
+        return 0.0, round(limit_price, 4)
+
+    def log_spread_capture_trades(
+        self,
+        *,
+        mode: str,
+        fills: Dict[str, Tuple[float, float]],
+    ) -> None:
+        """Persist one history row per capture with actual fill prices."""
+        if not fills:
+            return
+        market_name = (
+            self.active_market["question"] if self.active_market else "Unknown Market"
+        )
+        slug = (
+            (self.active_market.get("slug") if self.active_market else None)
+            or self.market_slug
+            or self.asset_type
+        )
+        ts_ms = int(t.time() * 1000)
+
+        if mode == "dual" and "YES" in fills and "NO" in fills:
+            yes_sz, yes_px = fills["YES"]
+            no_sz, no_px = fills["NO"]
+            append_trade_history({
+                "asset":       self.asset_type.upper(),
+                "window":      self.window_slug,
+                "market":      market_name,
+                "slug":        slug,
+                "action":      "buy",
+                "side":        "SPREAD",
+                "price":       round(yes_px + no_px, 4),
+                "size":        round(min(yes_sz, no_sz), 4),
+                "timestamp_ms": ts_ms,
+                "yes_price":   round(yes_px, 4),
+                "no_price":    round(no_px, 4),
+                "yes_size":    round(yes_sz, 4),
+                "no_size":     round(no_sz, 4),
+            })
+            return
+
+        for side, (fill_size, fill_price) in fills.items():
+            append_trade_history({
+                "asset":       self.asset_type.upper(),
+                "window":      self.window_slug,
+                "market":      market_name,
+                "slug":        slug,
+                "action":      "buy",
+                "side":        side,
+                "price":       round(fill_price, 4),
+                "size":        round(fill_size, 4),
+                "timestamp_ms": ts_ms,
+            })
 
     def get_spread_unrealized_pnl(self) -> Tuple[float, float]:
         """Mark-to-market for spread inventory (matched pairs @ $1, unpaired @ bid)."""

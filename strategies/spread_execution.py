@@ -32,21 +32,13 @@ async def execute_spread_decision(worker: "MarketWorker", decision: SpreadDecisi
 
     cfg = worker.worker_config
     mode_label = decision.mode.upper()
-    yes_c = round(decision.yes_price * 100)
-    no_c = round(decision.no_price * 100)
 
-    legs: List[Tuple[str, float]] = []
-    if decision.mode == "dual":
-        legs = [("YES", decision.yes_price), ("NO", decision.no_price)]
-    elif decision.rebalance_side:
-        px = (
-            decision.yes_price if decision.rebalance_side == "YES"
-            else decision.no_price
-        )
-        legs = [(decision.rebalance_side, px)]
-
+    legs = worker.resolve_spread_execution_legs(decision)
     if not legs:
         return
+
+    yes_c = round(next((p for s, p in legs if s == "YES"), 0.0) * 100)
+    no_c = round(next((p for s, p in legs if s == "NO"), 0.0) * 100)
 
     for side, _price in legs:
         if not worker.validate_spread_order_size(side, decision.size):
@@ -84,7 +76,6 @@ async def execute_spread_decision(worker: "MarketWorker", decision: SpreadDecisi
                 if in_time:
                     fills[side] = (size, price)
                     worker.spread_inventory.record_buy(side, size, price)
-                    worker.log_trade(side, price, "buy", size=size)
                     print(
                         f"  🧪 [DRY FILL] {side} {size:.2f}@{round(price*100)}c "
                         f"after {delay_sec:.2f}s"
@@ -103,6 +94,8 @@ async def execute_spread_decision(worker: "MarketWorker", decision: SpreadDecisi
                 elif no_fill > 0 and yes_fill <= 0:
                     print("  🧪 [DRY] One-leg: NO filled, YES cancelled")
 
+            if fills:
+                worker.log_spread_capture_trades(mode=decision.mode, fills=fills)
             worker._log_spread_capture(decision, fills=fills or None, dry_run=True)
             elapsed = time.monotonic() - start
             print(f"  🧪 [DRY SPREAD] cycle done in {elapsed:.2f}s")
@@ -129,14 +122,16 @@ async def execute_spread_decision(worker: "MarketWorker", decision: SpreadDecisi
         await asyncio.sleep(cfg.trade_cooldown_ms / 1000.0)
 
         fills: Dict[str, Tuple[float, float]] = {}
-        for (side, price), result in zip(legs, placed):
+        for (side, limit_price), result in zip(legs, placed):
             order_id, fill_size = result
+            fill_price = limit_price
             if order_id and order_id != "dry-run":
-                fill_size = await worker.poll_order_fill(order_id, order_size)
+                fill_size, fill_price = await worker.poll_order_fill(
+                    order_id, order_size, limit_price,
+                )
             if fill_size > 0:
-                fills[side] = (fill_size, price)
-                worker.spread_inventory.record_buy(side, fill_size, price)
-                worker.log_trade(side, price, "buy", size=fill_size)
+                fills[side] = (fill_size, fill_price)
+                worker.spread_inventory.record_buy(side, fill_size, fill_price)
             elif order_id and order_id not in ("dry-run", None):
                 worker._try_cancel_order(order_id)
 
@@ -152,6 +147,8 @@ async def execute_spread_decision(worker: "MarketWorker", decision: SpreadDecisi
                 if yes_oid:
                     worker._try_cancel_order(yes_oid)
 
+        if fills:
+            worker.log_spread_capture_trades(mode=decision.mode, fills=fills)
         worker._log_spread_capture(decision, fills=fills)
     finally:
         worker.spread_state = SpreadState.IDLE

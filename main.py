@@ -1309,7 +1309,7 @@ function renderPositions(positions) {
     const sideCls = p.side === 'YES' ? 'pm-side-yes' : p.side === 'NO' ? 'pm-side-no' : 'pm-side-spread';
     const isSpread = p.side === 'SPREAD';
     const entryDetail = isSpread
-      ? `<span>Y ${Number(p.yes_shares||0).toFixed(1)}@${_fmtCents(p.yes_avg_price_c)} · N ${Number(p.no_shares||0).toFixed(1)}@${_fmtCents(p.no_avg_price_c)}${p.pair_avg_price_c ? ' · pair '+_fmtCents(p.pair_avg_price_c) : ''}</span>`
+      ? `<span>Y ${Number(p.yes_shares||0).toFixed(1)}@${_fmtCents(p.yes_avg_price_c)} avg · N ${Number(p.no_shares||0).toFixed(1)}@${_fmtCents(p.no_avg_price_c)} avg${p.pair_avg_price_c ? ' · pair '+_fmtCents(p.pair_avg_price_c)+' avg' : ''}</span>`
       : `<span class="${sideCls}">${p.side}</span><span>${_fmtCents(p.entry_price_cents)} → ${_fmtCents(p.current_price_cents)}</span>`;
     return `
       <div class="pm-row" data-asset="${p.asset}" data-window="${p.window || '5m'}">
@@ -1348,11 +1348,17 @@ function renderTradeHistory(trades) {
   }
   el.innerHTML = trades.map(t => {
     const { label, cls } = _historyActionStyle(t.action);
-    const sideCls = t.side === 'YES' ? 'pm-side-yes' : 'pm-side-no';
+    const isSpreadTrade = (t.side || '') === 'SPREAD';
+    const sideCls = isSpreadTrade ? 'pm-side-spread' : (t.side === 'YES' ? 'pm-side-yes' : 'pm-side-no');
     const ts = t.timestamp_ms
       ? new Date(t.timestamp_ms).toLocaleString('en-US', {month:'short',day:'numeric',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true})
       : (t.timestamp || '—');
-    const priceC = _fmtCents((Number(t.price) || 0) * 100);
+    const detail = isSpreadTrade
+      ? `<span class="${sideCls}">SPREAD</span><span>Y ${Number(t.yes_size||0).toFixed(1)}@${_fmtCents((Number(t.yes_price)||0)*100)} · N ${Number(t.no_size||0).toFixed(1)}@${_fmtCents((Number(t.no_price)||0)*100)}</span>`
+      : `<span class="${sideCls}">${t.side || ''}</span><span>${_fmtCents((Number(t.price) || 0) * 100)}</span>`;
+    const sizeLabel = isSpreadTrade
+      ? `${Number(t.size||0).toFixed(2)} pair sh`
+      : `${Number(t.size).toFixed(2)} sh`;
     return `
       <div class="pm-row">
         <div class="pm-row-main">
@@ -1360,9 +1366,8 @@ function renderTradeHistory(trades) {
           <div class="pm-row-sub">
             <span>${t.asset || ''}</span>
             <span class="${cls}">${label}</span>
-            <span class="${sideCls}">${t.side || ''}</span>
-            <span>${priceC}</span>
-            <span>${Number(t.size).toFixed(2)} sh</span>
+            ${detail}
+            <span>${sizeLabel}</span>
           </div>
         </div>
         <div class="pm-row-stats">
@@ -1559,10 +1564,10 @@ function renderCard(bot){
   const yesAvgC=(bot.yes_shares||0)>0?(bot.yes_avg_price_c||0):null;
   const noAvgC=(bot.no_shares||0)>0?(bot.no_avg_price_c||0):null;
   const yesShLabel=(bot.yes_shares||0)>0
-    ?`YES ${(bot.yes_shares||0).toFixed(1)} sh @ ${yesAvgC.toFixed(1)}c`
+    ?`YES ${(bot.yes_shares||0).toFixed(1)} sh avg @ ${yesAvgC.toFixed(1)}c`
     :`YES 0 / ${(bot.max_shares||'?')}`;
   const noShLabel=(bot.no_shares||0)>0
-    ?`NO ${(bot.no_shares||0).toFixed(1)} sh @ ${noAvgC.toFixed(1)}c`
+    ?`NO ${(bot.no_shares||0).toFixed(1)} sh avg @ ${noAvgC.toFixed(1)}c`
     :`NO 0 / ${(bot.max_shares||'?')}`;
   const pairAvgC=(bot.pair_avg_price_c||0)>0?bot.pair_avg_price_c:null;
   const wins=bot.wins??0;const losses=bot.losses??0;

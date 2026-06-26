@@ -19,8 +19,8 @@ class SpreadCaptureStrategy:
             return None
 
         cfg = worker.worker_config
-        up_bid = worker.bids.get("YES", 0.0)
-        down_bid = worker.bids.get("NO", 0.0)
+        up_bid = worker.effective_bid("YES")
+        down_bid = worker.effective_bid("NO")
         if up_bid <= 0 or down_bid <= 0:
             return None
         if is_locked_price(up_bid) or is_locked_price(down_bid):
