@@ -505,6 +505,59 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
   <style>
+    :root {
+      /* default: green */
+      --accent:        #22c55e;
+      --accent-dark:   #16a34a;
+      --accent-dim:    rgba(34,197,94,0.15);
+      --accent-dimmer: rgba(34,197,94,0.12);
+      --accent-border: rgba(34,197,94,0.25);
+      --accent-glow:   rgba(34,197,94,0.08);
+    }
+
+    [data-theme="btc"] {
+      --accent:        #f7931a;
+      --accent-dark:   #c97314;
+      --accent-dim:    rgba(247,147,26,0.15);
+      --accent-dimmer: rgba(247,147,26,0.12);
+      --accent-border: rgba(247,147,26,0.25);
+      --accent-glow:   rgba(247,147,26,0.08);
+    }
+
+    [data-theme="eth"] {
+      --accent:        #627eea;
+      --accent-dark:   #4a62c4;
+      --accent-dim:    rgba(98,126,234,0.15);
+      --accent-dimmer: rgba(98,126,234,0.12);
+      --accent-border: rgba(98,126,234,0.25);
+      --accent-glow:   rgba(98,126,234,0.08);
+    }
+
+    [data-theme="sol"] {
+      --accent:        #9945ff;
+      --accent-dark:   #7a33d4;
+      --accent-dim:    rgba(153,69,255,0.15);
+      --accent-dimmer: rgba(153,69,255,0.12);
+      --accent-border: rgba(153,69,255,0.25);
+      --accent-glow:   rgba(153,69,255,0.08);
+    }
+
+    [data-theme="xrp"] {
+      --accent:        #346aa9;
+      --accent-dark:   #275280;
+      --accent-dim:    rgba(52,106,169,0.15);
+      --accent-dimmer: rgba(52,106,169,0.12);
+      --accent-border: rgba(52,106,169,0.25);
+      --accent-glow:   rgba(52,106,169,0.08);
+    }
+
+    .theme-dot {
+      width:18px; height:18px; border-radius:50%; border:2px solid transparent;
+      cursor:pointer; transition:border-color .15s, transform .15s;
+      padding:0;
+    }
+    .theme-dot.active { border-color:#fff; transform:scale(1.2); }
+
     *, *::before, *::after { box-sizing: border-box; }
     body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
     .mono, .font-mono, [class*="font-mono"] {
@@ -514,12 +567,12 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .font-mono { font-family: 'JetBrains Mono','Consolas','Menlo',monospace !important; font-variant-numeric: tabular-nums; }
     .card { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
     .card:hover { transform: translateY(-3px); }
-    .sig-strong-bull  { color: #22c55e; font-weight: 700; }
+    .sig-strong-bull  { color: var(--accent); font-weight: 700; }
     .sig-strong-bear  { color: #ef4444; font-weight: 700; }
     .sig-mild-bull    { color: #86efac; }
     .sig-mild-bear    { color: #fca5a5; }
     .sig-neutral      { color: #71717a; }
-    .pill-strong-bull { background: rgba(34,197,94,.15);   color: #22c55e; }
+    .pill-strong-bull { background: var(--accent-dim);   color: var(--accent); }
     .pill-strong-bear { background: rgba(239,68,68,.15);   color: #ef4444; }
     .pill-mild-bull   { background: rgba(134,239,172,.12); color: #86efac; }
     .pill-mild-bear   { background: rgba(252,165,165,.12); color: #fca5a5; }
@@ -529,7 +582,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .pm-card-hdr { display:flex; justify-content:space-between; align-items:center; padding:18px 20px 4px; }
     .pm-label-grp { display:flex; align-items:center; gap:7px; }
     .pm-tri { font-size:11px; font-weight:700; line-height:1; }
-    .pm-tri.pos { color:#22c55e; } .pm-tri.neg { color:#ef4444; }
+    .pm-tri.pos { color:var(--accent); } .pm-tri.neg { color:#ef4444; }
     .pm-lbl-txt { font-size:12px; font-weight:500; color:#71717a; letter-spacing:.04em; text-transform:uppercase; }
     .pm-per-tabs { display:flex; gap:1px; }
     .pm-per-btn {
@@ -538,7 +591,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       font-size:11px; font-weight:600; padding:5px 8px; border-radius:6px;
       cursor:pointer; transition:all .15s; letter-spacing:.03em;
     }
-    .pm-per-btn.act { background:#22c55e; color:#0a0a0a; }
+    .pm-per-btn.act { background:var(--accent); color:#0a0a0a; }
     .pm-val-block { padding:6px 20px 0; display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
     .pm-balance-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .pm-balance-toggle {
@@ -547,12 +600,12 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       font-size:17px; line-height:1; flex-shrink:0;
     }
     .pm-balance-toggle:hover { color:#a1a1aa; background:rgba(255,255,255,0.06); }
-    .pm-balance-toggle:focus-visible { outline:2px solid #22c55e; outline-offset:2px; }
+    .pm-balance-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
     .pm-big-val { font-family:'Inter',system-ui,sans-serif; font-size:40px; font-weight:800; line-height:1; letter-spacing:-.04em; }
-    .pm-big-val.pos { color:#22c55e; } .pm-big-val.neg { color:#ef4444; } .pm-big-val.neu { color:#e4e4e7; }
+    .pm-big-val.pos { color:var(--accent); } .pm-big-val.neg { color:#ef4444; } .pm-big-val.neu { color:#e4e4e7; }
     .ps-stat-val { font-family:'Inter',system-ui,sans-serif; font-size:20px; font-weight:700; line-height:1.2; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
     .pm-change-lbl { font-family:'JetBrains Mono','Consolas',monospace; font-variant-numeric:tabular-nums; font-size:12px; font-weight:600; color:#71717a; letter-spacing:.01em; }
-    .pm-change-lbl.pos { color:#22c55e; } .pm-change-lbl.neg { color:#ef4444; }
+    .pm-change-lbl.pos { color:var(--accent); } .pm-change-lbl.neg { color:#ef4444; }
     .pm-chart-box { height:160px; position:relative; overflow:hidden; margin-top:12px; }
     .pm-chart-box svg { display:block; width:100%; height:100%; pointer-events:none; }
     .pm-no-data { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:12px; color:#52525b; white-space:nowrap; pointer-events:none; }
@@ -571,7 +624,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       cursor:pointer; transition:color .15s,border-color .15s;
     }
     .pm-section-tab:hover { color:#a1a1aa; }
-    .pm-section-tab.act { color:#fafafa; border-bottom-color:#22c55e; }
+    .pm-section-tab.act { color:#fafafa; border-bottom-color:var(--accent); }
     .pm-section-panel { padding:0; min-height:120px; }
     .pm-section-panel.hidden { display:none; }
     .pm-trades-panel { padding:16px 20px 20px; }
@@ -592,23 +645,23 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .pm-row-main { flex:1; min-width:0; }
     .pm-row-title { font-size:13px; font-weight:600; color:#e4e4e7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .pm-row-sub { font-size:11px; color:#71717a; margin-top:3px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-    .pm-side-yes { color:#22c55e; font-weight:600; font-size:11px; }
+    .pm-side-yes { color:var(--accent); font-weight:600; font-size:11px; }
     .pm-side-no  { color:#ef4444; font-weight:600; font-size:11px; }
-    .pm-action-buy  { color:#22c55e; font-weight:700; font-size:11px; letter-spacing:.04em; }
+    .pm-action-buy  { color:var(--accent); font-weight:700; font-size:11px; letter-spacing:.04em; }
     .pm-action-sell { color:#f97316; font-weight:700; font-size:11px; letter-spacing:.04em; }
     .pm-action-redeem { color:#38bdf8; font-weight:700; font-size:11px; letter-spacing:.04em; }
     .pm-row-stats { display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex-shrink:0; }
     .pm-row-val { font-family:'JetBrains Mono','Consolas',monospace; font-variant-numeric:tabular-nums; font-size:13px; font-weight:600; color:#e4e4e7; }
-    .pm-row-val.pos { color:#22c55e; } .pm-row-val.neg { color:#ef4444; }
+    .pm-row-val.pos { color:var(--accent); } .pm-row-val.neg { color:#ef4444; }
     .pm-row-meta { font-size:10px; color:#52525b; font-family:'JetBrains Mono','Consolas',monospace; }
-    .pm-row-meta.pos { color:#22c55e; } .pm-row-meta.neg { color:#ef4444; }
+    .pm-row-meta.pos { color:var(--accent); } .pm-row-meta.neg { color:#ef4444; }
     .pm-cashout-btn {
-      background:rgba(34,197,94,.12); color:#22c55e; border:1px solid rgba(34,197,94,.25);
+      background:var(--accent-dimmer); color:var(--accent); border:1px solid var(--accent-border);
       font-family:'Inter',system-ui,sans-serif; font-size:11px; font-weight:700;
       padding:6px 12px; border-radius:8px; cursor:pointer; flex-shrink:0;
       transition:background .15s,opacity .15s; letter-spacing:.02em;
     }
-    .pm-cashout-btn:hover:not(:disabled) { background:rgba(34,197,94,.22); }
+    .pm-cashout-btn:hover:not(:disabled) { background:var(--accent-border); }
     .pm-cashout-btn:disabled { opacity:.45; cursor:not-allowed; }
     @media (max-width:640px) {
       .pm-row { flex-wrap:wrap; }
@@ -630,16 +683,26 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       </h1>
       <p id="assets-subtitle" class="text-zinc-500 text-sm mt-1 font-mono">__TRADING_ASSETS__</p>
     </div>
-    <span id="conn-dot" class="w-2.5 h-2.5 rounded-full bg-zinc-600 inline-block" title="WebSocket status"></span>
+    <div class="flex items-center gap-3">
+      <div id="theme-picker" style="display:flex;gap:6px;align-items:center;">
+        <button type="button" onclick="setTheme('')"    data-t=""    class="theme-dot" style="background:#22c55e" title="Green (default)"></button>
+        <button type="button" onclick="setTheme('btc')" data-t="btc" class="theme-dot" style="background:#f7931a" title="BTC"></button>
+        <button type="button" onclick="setTheme('eth')" data-t="eth" class="theme-dot" style="background:#627eea" title="ETH"></button>
+        <button type="button" onclick="setTheme('sol')" data-t="sol" class="theme-dot" style="background:#9945ff" title="SOL"></button>
+        <button type="button" onclick="setTheme('xrp')" data-t="xrp" class="theme-dot" style="background:#346aa9" title="XRP"></button>
+      </div>
+      <span id="conn-dot" class="w-2.5 h-2.5 rounded-full bg-zinc-600 inline-block" title="WebSocket status"></span>
+    </div>
   </div>
 
   <!-- ── Trading schedule banner ─────────────────────────────────── -->
   <div id="schedule-banner"
-       class="mb-4 px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2
-              bg-emerald-950 text-emerald-400 border border-emerald-900"
+       class="mb-4 px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 border"
        style="font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:.02em;
+              background:var(--accent-glow);color:var(--accent);border-color:var(--accent-border);
               transition:background .4s,color .4s,border-color .4s;">
-    <span id="schedule-dot" class="w-2 h-2 rounded-full bg-emerald-400 inline-block flex-shrink-0"></span>
+    <span id="schedule-dot" class="w-2 h-2 rounded-full inline-block flex-shrink-0"
+          style="background:var(--accent)"></span>
     <span id="schedule-text">Checking trading schedule…</span>
   </div>
 
@@ -662,8 +725,8 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     </div>
   </div>
 
-  <p id="math-quote" class="text-[#22c55e] mb-5 text-sm font-bold"
-     style="font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:-.03em;line-height:1;transition:opacity .6s ease;"></p>
+  <p id="math-quote" class="mb-5 text-sm font-bold"
+     style="color:var(--accent);font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:-.03em;line-height:1;transition:opacity .6s ease;"></p>
   <script>
   (function(){
     var q=[
@@ -811,9 +874,36 @@ function _saveBalancePref() {
 function _maskUsd() { return '••••'; }
 function _maskCents() { return '•••'; }
 
+function _accentColor() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+}
+function _accentDark() {
+  return getComputedStyle(document.documentElement).getPropertyValue('--accent-dark').trim();
+}
+
+const _THEME_LS = 'pm_theme';
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem(_THEME_LS, t); } catch(e){}
+  document.querySelectorAll('.theme-dot').forEach(b => {
+    b.classList.toggle('active', b.dataset.t === t);
+  });
+  schedulePnlChartUpdate(true);
+}
+function _loadTheme() {
+  try {
+    const t = localStorage.getItem(_THEME_LS) || '';
+    setTheme(t);
+  } catch(e) { setTheme(''); }
+}
+
+function _fmtMoney(abs) {
+  const [int, dec] = abs.toFixed(2).split('.');
+  return int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + dec;
+}
 function _displayBigVal(val) {
   if (!_balanceVisible) return _maskUsd();
-  return (val >= 0 ? '' : '-') + '$' + Math.abs(val).toFixed(2);
+  return (val >= 0 ? '' : '-') + '$' + _fmtMoney(Math.abs(val));
 }
 
 function _displayPeriodChange(change, pct, arrow, periodLabel) {
@@ -825,7 +915,7 @@ function _displayPeriodChange(change, pct, arrow, periodLabel) {
     return `${maskedPart}  ${arrow}  ${periodLabel}`;
   }
   const sign = change >= 0 ? '+' : '';
-  return `${sign}$${Math.abs(change).toFixed(2)}${pctStr}  ${arrow}  ${periodLabel}`;
+  return `${sign}$${_fmtMoney(Math.abs(change))}${pctStr}  ${arrow}  ${periodLabel}`;
 }
 
 function _updateBalanceToggleUI() {
@@ -1061,8 +1151,8 @@ function updatePnlChart() {
   const mx = t => _xForTime(t, tMin, span, PX, drawW).toFixed(2);
   const my = v  => (PY + drawH - ((v - lo) / vRange * drawH)).toFixed(2);
 
-  const lineColor  = periodChange >= 0 ? '#22c55e' : '#ef4444';
-  const lineColor2 = periodChange >= 0 ? '#16a34a' : '#dc2626';
+  const lineColor  = periodChange >= 0 ? _accentColor() : '#ef4444';
+  const lineColor2 = periodChange >= 0 ? _accentDark() : '#dc2626';
 
   const dLine = pts.map((p, i) => `${i===0?'M':'L'}${mx(p.t)},${my(p.v)}`).join(' ');
   const zeroY = parseFloat(my(0));
@@ -1303,7 +1393,7 @@ function _fmtUsd(v, signed) {
   if (!_balanceVisible) return _maskUsd();
   const n = Number(v) || 0;
   const sign = signed && n > 0 ? '+' : (signed && n < 0 ? '' : '');
-  return sign + '$' + Math.abs(n).toFixed(2);
+  return sign + '$' + _fmtMoney(Math.abs(n));
 }
 
 function _fmtCents(c) {
@@ -1316,14 +1406,14 @@ function _displayTradePnl(dollars, pct) {
   if (!_balanceVisible) return _maskUsd() + pctPart;
   const n = Number(dollars) || 0;
   const pnlPos = n >= 0;
-  return `${pnlPos ? '+' : ''}$${Math.abs(n).toFixed(2)}${pctPart}`;
+  return `${pnlPos ? '+' : ''}$${_fmtMoney(Math.abs(n))}${pctPart}`;
 }
 
 function _displayCumulativePnl(val) {
   if (!_balanceVisible) return _maskUsd();
   const n = Number(val) || 0;
   const cumPos = n >= 0;
-  return `${cumPos ? '+' : ''}$${Math.abs(n).toFixed(2)}`;
+  return `${cumPos ? '+' : ''}$${_fmtMoney(Math.abs(n))}`;
 }
 
 function _displayYesNoPrice(val) {
@@ -1472,7 +1562,7 @@ function renderProfileStats(bots, g) {
       posEl.className = 'ps-stat-val text-zinc-200';
     } else {
       const n = positionsValue;
-      posEl.textContent = (n >= 0 ? '' : '-') + '$' + Math.abs(n).toFixed(2);
+      posEl.textContent = (n >= 0 ? '' : '-') + '$' + _fmtMoney(Math.abs(n));
       posEl.className = 'ps-stat-val ' + (n > 0 ? 'text-emerald-400' : n < 0 ? 'text-red-400' : 'text-zinc-200');
     }
   }
@@ -1485,7 +1575,7 @@ function renderProfileStats(bots, g) {
       winEl.textContent = '$0.00';
       winEl.className = 'ps-stat-val text-zinc-200';
     } else {
-      winEl.textContent = '+$' + biggestWin.toFixed(2);
+      winEl.textContent = '+$' + _fmtMoney(biggestWin);
       winEl.className = 'ps-stat-val text-emerald-400';
     }
   }
@@ -1511,29 +1601,37 @@ function renderGlobalStats(g) {
   const banner   = el('schedule-banner');
   const dot      = el('schedule-dot');
   const schedTxt = el('schedule-text');
+  const BANNER_BASE = 'mb-4 px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 border';
+  const DOT_BASE = 'w-2 h-2 rounded-full inline-block flex-shrink-0';
   if (banner && dot && schedTxt) {
     const allowed  = g.trading_allowed ?? true;
     const tz       = g.trading_tz || 'UTC';
     const inCd     = (g.workers_in_cooldown ?? g.assets_in_cooldown ?? 0) > 0;
     if (allowed && !inCd) {
-      banner.className   = banner.className.replace(
-        /bg-\S+|text-\S+|border-\S+/g, '').trim() +
-        ' bg-emerald-950 text-emerald-400 border border-emerald-900';
-      dot.className      = 'w-2 h-2 rounded-full bg-emerald-400 inline-block flex-shrink-0';
+      banner.className = BANNER_BASE;
+      banner.style.background = 'var(--accent-glow)';
+      banner.style.color = 'var(--accent)';
+      banner.style.borderColor = 'var(--accent-border)';
+      dot.className = DOT_BASE;
+      dot.style.background = 'var(--accent)';
       schedTxt.textContent =
         `✅ Trading ACTIVE — new entries permitted (${tz})`;
     } else if (!allowed) {
-      banner.className   = banner.className.replace(
-        /bg-\S+|text-\S+|border-\S+/g, '').trim() +
-        ' bg-yellow-950 text-yellow-400 border border-yellow-900';
-      dot.className      = 'w-2 h-2 rounded-full bg-yellow-400 inline-block flex-shrink-0';
+      banner.className = BANNER_BASE;
+      banner.style.background = 'rgba(234,179,8,0.12)';
+      banner.style.color = '#facc15';
+      banner.style.borderColor = '#713f12';
+      dot.className = DOT_BASE;
+      dot.style.background = '#facc15';
       schedTxt.textContent =
         `🚫 Weekend — new entries BLOCKED (${tz}). TP/SL and portfolio tracking continue.`;
     } else {
-      banner.className   = banner.className.replace(
-        /bg-\S+|text-\S+|border-\S+/g, '').trim() +
-        ' bg-orange-950 text-orange-400 border border-orange-900';
-      dot.className      = 'w-2 h-2 rounded-full bg-orange-400 inline-block flex-shrink-0';
+      banner.className = BANNER_BASE;
+      banner.style.background = 'rgba(154,52,18,0.15)';
+      banner.style.color = '#fb923c';
+      banner.style.borderColor = '#7c2d12';
+      dot.className = DOT_BASE;
+      dot.style.background = '#fb923c';
       schedTxt.textContent =
         `🛡️ ${g.workers_in_cooldown ?? g.assets_in_cooldown} worker(s) in COOLDOWN — new entries blocked. TP/SL continues.`;
     }
@@ -1627,11 +1725,11 @@ function _fmtPositionRow(bot) {
   let noCost = 0;
   if (ySh > 0) {
     yesCost = ySh * (Number(bot.yes_avg_price_c) || 0) / 100;
-    parts.push(`YES @ $${yesCost.toFixed(2)}`);
+    parts.push(`YES @ $${_fmtMoney(yesCost)}`);
   }
   if (nSh > 0) {
     noCost = nSh * (Number(bot.no_avg_price_c) || 0) / 100;
-    parts.push(`NO @ $${noCost.toFixed(2)}`);
+    parts.push(`NO @ $${_fmtMoney(noCost)}`);
   }
   let text = parts.join(' ');
   if (ySh > 0 && nSh > 0) text += ` (pair=$${(yesCost + noCost).toFixed(1)})`;
@@ -1765,6 +1863,7 @@ function renderCard(bot){
 // The backend will return backfilled historical data so the chart shows
 // past performance right away — not an empty chart from today.
 _loadBalancePref();
+_loadTheme();
 _updateBalanceToggleUI();
 _initChartOverlay();
 loadHistory(_pnlPeriod);
