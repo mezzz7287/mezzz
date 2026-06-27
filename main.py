@@ -154,6 +154,8 @@ _last_redis_flush:   float      = 0.0
 _SNAPSHOT_EVERY_SEC: int        = 60   # record a portfolio snapshot this often
 _FLUSH_EVERY_SEC:    int        = 60   # flush buffer → Redis this often
 
+_biggest_win_cache: dict[str, float | int] = {'value': 0.0, 'last_total_trades': -1}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STARTUP
@@ -222,6 +224,12 @@ async def _initialize_bots():
             except Exception as th_err:
                 print(f"⚠️  [trade-history] Non-fatal backfill error: {th_err}")
                 traceback.print_exc()
+
+        global _biggest_win_cache
+        _biggest_win_cache['value'] = _compute_biggest_win()
+        _biggest_win_cache['last_total_trades'] = (
+            sum(getattr(b, "wins", 0) + getattr(b, "losses", 0) for b in bots)
+        )
 
         asyncio.create_task(run_all_bots())
         print("🎉 All bots started successfully!")
@@ -348,7 +356,13 @@ async def broadcast_loop():
             await asyncio.sleep(3)
 
 
+def _compute_biggest_win() -> float:
+    trades = get_trade_history(200)
+    return max((t.get('pnl_dollars') or 0 for t in trades), default=0.0)
+
+
 def get_global_stats() -> dict:
+    global _biggest_win_cache
     # Compute trading schedule status once so it's consistent across the dict.
     _trading_ok = is_trading_allowed()
 
@@ -362,6 +376,7 @@ def get_global_stats() -> dict:
             "assets_in_cooldown": 0,
             "asset_max_loss": ASSET_MAX_CUMULATIVE_LOSS,
             "asset_cooldown_minutes": ASSET_COOLDOWN_MINUTES,
+            "biggest_win": round(_biggest_win_cache['value'], 2),
         }
 
     total_pnl       = 0.0
@@ -397,6 +412,10 @@ def get_global_stats() -> dict:
     total_trades = total_wins + total_losses
     win_rate     = round((total_wins / total_trades) * 100, 1) if total_trades > 0 else 0.0
 
+    if total_trades != _biggest_win_cache['last_total_trades']:
+        _biggest_win_cache['value'] = _compute_biggest_win()
+        _biggest_win_cache['last_total_trades'] = total_trades
+
     workers_in_cooldown = 0
     if asset_cooldown is not None:
         try:
@@ -422,6 +441,7 @@ def get_global_stats() -> dict:
         "workers_in_cooldown":  workers_in_cooldown,
         "asset_max_loss":       ASSET_MAX_CUMULATIVE_LOSS,
         "asset_cooldown_minutes": ASSET_COOLDOWN_MINUTES,
+        "biggest_win":          round(_biggest_win_cache['value'], 2),
     }
 
 
@@ -619,6 +639,25 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     <span id="schedule-text">Checking trading schedule…</span>
   </div>
 
+  <!-- ── Profile stats strip (Polymarket-style) ─────────────────── -->
+  <div id="profile-stats-strip" class="grid grid-cols-3 w-full mb-5">
+    <div class="flex flex-col gap-1">
+      <span class="text-[10px] font-semibold uppercase tracking-widest text-zinc-500"
+            style="font-family:'Inter',system-ui,sans-serif;">Positions Value</span>
+      <span class="pm-big-val text-zinc-200" id="ps-positions-value">$0.00</span>
+    </div>
+    <div class="flex flex-col gap-1">
+      <span class="text-[10px] font-semibold uppercase tracking-widest text-zinc-500"
+            style="font-family:'Inter',system-ui,sans-serif;">Biggest Win</span>
+      <span class="pm-big-val text-zinc-200" id="ps-biggest-win">$0.00</span>
+    </div>
+    <div class="flex flex-col gap-1">
+      <span class="text-[10px] font-semibold uppercase tracking-widest text-zinc-500"
+            style="font-family:'Inter',system-ui,sans-serif;">Predictions</span>
+      <span class="pm-big-val text-zinc-100" id="ps-predictions">0</span>
+    </div>
+  </div>
+
   <p id="math-quote" class="text-[#22c55e] mb-5 text-sm font-bold"
      style="font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:-.03em;line-height:1;transition:opacity .6s ease;"></p>
   <script>
@@ -738,6 +777,7 @@ const _FLAT_EPS = 0.005;
 const _BALANCE_LS_KEY = 'pm_balance_visible';
 
 let _balanceVisible = true;
+let _profileStats = { positionsValue: 0, biggestWin: 0, predictions: 0 };
 let _historyPts    = [];
 let _livePts       = [];
 let _pnlPeriod     = '1D';
@@ -805,6 +845,7 @@ function refreshBalanceSensitiveUI() {
   renderPositions(window._lastPositions || []);
   if (window._lastBots) renderBots(window._lastBots);
   if (window._lastTradeHistory) renderTradeHistory(window._lastTradeHistory);
+  renderProfileStats(window._lastBots || [], window._lastGlobalStats || {});
 }
 
 function _updatePositionsTabCount(count) {
@@ -1205,7 +1246,9 @@ function connect() {
     const d = JSON.parse(e.data);
     window._lastBots = d.bots || [];
     window._lastTradeHistory = d.trade_history || [];
+    window._lastGlobalStats = d.global_stats || {};
     renderGlobalStats(d.global_stats);
+    renderProfileStats(window._lastBots, window._lastGlobalStats);
     pushLivePnlPoint(d.global_stats.total_pnl ?? 0);
     renderBots(window._lastBots);
     renderPositions(d.positions || []);
@@ -1403,6 +1446,52 @@ async function cashoutPosition(asset, window) {
 // ═══════════════════════════════════════════════════════════════════
 // GLOBAL STATS
 // ═══════════════════════════════════════════════════════════════════
+function renderProfileStats(bots, g) {
+  let positionsValue = 0;
+  for (const bot of (bots || [])) {
+    const ySh = Number(bot.yes_shares) || 0;
+    const nSh = Number(bot.no_shares) || 0;
+    positionsValue += ySh * (Number(bot.yes_avg_price_c) || 0) / 100;
+    positionsValue += nSh * (Number(bot.no_avg_price_c) || 0) / 100;
+  }
+  const biggestWin = Number(g?.biggest_win) || 0;
+  const predictions = Number(g?.total_trades) || 0;
+  _profileStats = { positionsValue, biggestWin, predictions };
+
+  const posEl = document.getElementById('ps-positions-value');
+  const winEl = document.getElementById('ps-biggest-win');
+  const predEl = document.getElementById('ps-predictions');
+
+  if (posEl) {
+    if (!_balanceVisible) {
+      posEl.textContent = _maskUsd();
+      posEl.className = 'pm-big-val text-zinc-200';
+    } else {
+      const n = positionsValue;
+      posEl.textContent = (n >= 0 ? '' : '-') + '$' + Math.abs(n).toFixed(2);
+      posEl.className = 'pm-big-val ' + (n > 0 ? 'text-emerald-400' : n < 0 ? 'text-red-400' : 'text-zinc-200');
+    }
+  }
+
+  if (winEl) {
+    if (!_balanceVisible) {
+      winEl.textContent = _maskUsd();
+      winEl.className = 'pm-big-val text-zinc-200';
+    } else if (biggestWin === 0) {
+      winEl.textContent = '$0.00';
+      winEl.className = 'pm-big-val text-zinc-200';
+    } else {
+      winEl.textContent = '+$' + biggestWin.toFixed(2);
+      winEl.className = 'pm-big-val text-emerald-400';
+    }
+  }
+
+  if (predEl) {
+    predEl.textContent = String(predictions);
+    predEl.className = 'pm-big-val text-zinc-100';
+  }
+}
+
 function renderGlobalStats(g) {
   const el = id => document.getElementById(id);
   if (el('pm-st-trades')) el('pm-st-trades').textContent = g.total_trades ?? 0;
