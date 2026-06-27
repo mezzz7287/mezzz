@@ -513,6 +513,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       --accent-dimmer: rgba(34,197,94,0.12);
       --accent-border: rgba(34,197,94,0.25);
       --accent-glow:   rgba(34,197,94,0.08);
+      --accent-muted:  color-mix(in srgb, var(--accent) 62%, #a1a1aa);
+      --accent-subtle: color-mix(in srgb, var(--accent) 38%, #71717a);
+      --accent-border-soft: color-mix(in srgb, var(--accent) 22%, transparent);
     }
 
     [data-theme="btc"] {
@@ -567,12 +570,12 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .font-mono { font-family: 'JetBrains Mono','Consolas','Menlo',monospace !important; font-variant-numeric: tabular-nums; }
     .card { transition: all 0.3s cubic-bezier(0.4,0,0.2,1); }
     .card:hover { transform: translateY(-3px); }
-    .sig-strong-bull  { color: var(--accent); font-weight: 700; }
+    .sig-strong-bull  { color: var(--accent-muted); font-weight: 700; }
     .sig-strong-bear  { color: #ef4444; font-weight: 700; }
     .sig-mild-bull    { color: #86efac; }
     .sig-mild-bear    { color: #fca5a5; }
     .sig-neutral      { color: #71717a; }
-    .pill-strong-bull { background: var(--accent-dim);   color: var(--accent); }
+    .pill-strong-bull { background: var(--accent-dim);   color: var(--accent-muted); }
     .pill-strong-bear { background: rgba(239,68,68,.15);   color: #ef4444; }
     .pill-mild-bull   { background: rgba(134,239,172,.12); color: #86efac; }
     .pill-mild-bear   { background: rgba(252,165,165,.12); color: #fca5a5; }
@@ -582,7 +585,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .pm-card-hdr { display:flex; justify-content:space-between; align-items:center; padding:18px 20px 4px; }
     .pm-label-grp { display:flex; align-items:center; gap:7px; }
     .pm-tri { font-size:11px; font-weight:700; line-height:1; }
-    .pm-tri.pos { color:var(--accent); } .pm-tri.neg { color:#ef4444; }
+    .pm-tri.pos { color:var(--accent-muted); } .pm-tri.neg { color:#ef4444; }
     .pm-lbl-txt { font-size:12px; font-weight:500; color:#71717a; letter-spacing:.04em; text-transform:uppercase; }
     .pm-per-tabs { display:flex; gap:1px; }
     .pm-per-btn {
@@ -591,7 +594,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       font-size:11px; font-weight:600; padding:5px 8px; border-radius:6px;
       cursor:pointer; transition:all .15s; letter-spacing:.03em;
     }
-    .pm-per-btn.act { background:var(--accent); color:#0a0a0a; }
+    .pm-per-btn.act { background:color-mix(in srgb, var(--accent) 88%, #0a0a0a); color:#0a0a0a; }
     .pm-val-block { padding:6px 20px 0; display:flex; flex-direction:column; align-items:flex-start; gap:4px; }
     .pm-balance-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .pm-balance-toggle {
@@ -604,16 +607,32 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .pm-big-val { font-family:'Inter',system-ui,sans-serif; font-size:40px; font-weight:800; line-height:1; letter-spacing:-.04em; }
     .pm-big-val.pos { color:var(--accent); } .pm-big-val.neg { color:#ef4444; } .pm-big-val.neu { color:#e4e4e7; }
     .ps-stat-val { font-family:'Inter',system-ui,sans-serif; font-size:20px; font-weight:700; line-height:1.2; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
-    .ps-stat-val.pos { color:var(--accent); }
+    .ps-stat-val.pos { color:var(--accent-muted); }
+    .ps-stat-val.win { color:color-mix(in srgb, var(--accent) 75%, #d4d4d8); }
     .ps-stat-val.neg { color:#ef4444; }
     .ps-stat-val.neu { color:#e4e4e7; }
-    .pm-stat-num.pos { color:var(--accent); }
-    .text-accent { color:var(--accent); }
-    .border-l-accent { border-left-color:var(--accent); }
-    .badge-accent { background:var(--accent-glow); color:var(--accent); }
-    .conn-dot-on { background:var(--accent); }
+    .pm-stat-num.pos { color:var(--accent-muted); }
+    .text-accent { color:var(--accent-muted); }
+    .text-accent-bright { color:var(--accent); }
+    .border-l-accent { border-left-color:var(--accent-border-soft); }
+    .badge-accent {
+      background:var(--accent-dim); color:var(--accent-muted);
+      border:1px solid var(--accent-border-soft);
+    }
+    .conn-dot-on {
+      background:var(--accent-muted);
+      box-shadow:0 0 0 2px var(--accent-border-soft);
+    }
+    .conn-status {
+      display:flex; align-items:center; gap:6px;
+      font-family:'JetBrains Mono','Consolas',monospace;
+      font-size:11px; font-weight:600; letter-spacing:.03em;
+      color:#71717a; white-space:nowrap;
+    }
+    .conn-status.live { color:var(--accent-muted); }
+    .conn-status.off { color:#f87171; }
     .pm-change-lbl { font-family:'JetBrains Mono','Consolas',monospace; font-variant-numeric:tabular-nums; font-size:12px; font-weight:600; color:#71717a; letter-spacing:.01em; }
-    .pm-change-lbl.pos { color:var(--accent); } .pm-change-lbl.neg { color:#ef4444; }
+    .pm-change-lbl.pos { color:var(--accent-muted); } .pm-change-lbl.neg { color:#ef4444; }
     .pm-chart-box { height:160px; position:relative; overflow:hidden; margin-top:12px; }
     .pm-chart-box svg { display:block; width:100%; height:100%; pointer-events:none; }
     .pm-no-data { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:12px; color:#52525b; white-space:nowrap; pointer-events:none; }
@@ -632,7 +651,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
       cursor:pointer; transition:color .15s,border-color .15s;
     }
     .pm-section-tab:hover { color:#a1a1aa; }
-    .pm-section-tab.act { color:#fafafa; border-bottom-color:var(--accent); }
+    .pm-section-tab.act { color:#fafafa; border-bottom-color:var(--accent-muted); }
     .pm-section-panel { padding:0; min-height:120px; }
     .pm-section-panel.hidden { display:none; }
     .pm-trades-panel { padding:16px 20px 20px; }
@@ -653,23 +672,23 @@ HTML_CONTENT = r"""<!DOCTYPE html>
     .pm-row-main { flex:1; min-width:0; }
     .pm-row-title { font-size:13px; font-weight:600; color:#e4e4e7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .pm-row-sub { font-size:11px; color:#71717a; margin-top:3px; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-    .pm-side-yes { color:var(--accent); font-weight:600; font-size:11px; }
+    .pm-side-yes { color:var(--accent-muted); font-weight:600; font-size:11px; }
     .pm-side-no  { color:#ef4444; font-weight:600; font-size:11px; }
-    .pm-action-buy  { color:var(--accent); font-weight:700; font-size:11px; letter-spacing:.04em; }
+    .pm-action-buy  { color:var(--accent-muted); font-weight:700; font-size:11px; letter-spacing:.04em; }
     .pm-action-sell { color:#f97316; font-weight:700; font-size:11px; letter-spacing:.04em; }
     .pm-action-redeem { color:#38bdf8; font-weight:700; font-size:11px; letter-spacing:.04em; }
     .pm-row-stats { display:flex; flex-direction:column; align-items:flex-end; gap:2px; flex-shrink:0; }
     .pm-row-val { font-family:'JetBrains Mono','Consolas',monospace; font-variant-numeric:tabular-nums; font-size:13px; font-weight:600; color:#e4e4e7; }
-    .pm-row-val.pos { color:var(--accent); } .pm-row-val.neg { color:#ef4444; }
+    .pm-row-val.pos { color:var(--accent-muted); } .pm-row-val.neg { color:#ef4444; }
     .pm-row-meta { font-size:10px; color:#52525b; font-family:'JetBrains Mono','Consolas',monospace; }
-    .pm-row-meta.pos { color:var(--accent); } .pm-row-meta.neg { color:#ef4444; }
+    .pm-row-meta.pos { color:var(--accent-subtle); } .pm-row-meta.neg { color:#ef4444; }
     .pm-cashout-btn {
-      background:var(--accent-dimmer); color:var(--accent); border:1px solid var(--accent-border);
+      background:var(--accent-dimmer); color:var(--accent-muted); border:1px solid var(--accent-border-soft);
       font-family:'Inter',system-ui,sans-serif; font-size:11px; font-weight:700;
       padding:6px 12px; border-radius:8px; cursor:pointer; flex-shrink:0;
       transition:background .15s,opacity .15s; letter-spacing:.02em;
     }
-    .pm-cashout-btn:hover:not(:disabled) { background:var(--accent-border); }
+    .pm-cashout-btn:hover:not(:disabled) { background:var(--accent-dim); color:var(--accent); }
     .pm-cashout-btn:disabled { opacity:.45; cursor:not-allowed; }
     @media (max-width:640px) {
       .pm-row { flex-wrap:wrap; }
@@ -699,7 +718,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
         <button type="button" onclick="setTheme('sol')" data-t="sol" class="theme-dot" style="background:#9945ff" title="SOL"></button>
         <button type="button" onclick="setTheme('xrp')" data-t="xrp" class="theme-dot" style="background:#346aa9" title="XRP"></button>
       </div>
-      <span id="conn-dot" class="w-2.5 h-2.5 rounded-full bg-zinc-600 inline-block" title="WebSocket status"></span>
+      <div id="conn-status" class="conn-status" title="WebSocket status">
+        <span id="conn-dot" class="w-2.5 h-2.5 rounded-full bg-zinc-600 inline-block flex-shrink-0"></span>
+        <span id="conn-label">Connecting…</span>
+      </div>
     </div>
   </div>
 
@@ -707,10 +729,10 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   <div id="schedule-banner"
        class="mb-4 px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 border"
        style="font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:.02em;
-              background:var(--accent-glow);color:var(--accent);border-color:var(--accent-border);
+              background:var(--accent-glow);color:var(--accent-muted);border-color:var(--accent-border-soft);
               transition:background .4s,color .4s,border-color .4s;">
     <span id="schedule-dot" class="w-2 h-2 rounded-full inline-block flex-shrink-0"
-          style="background:var(--accent)"></span>
+          style="background:var(--accent-muted)"></span>
     <span id="schedule-text">Checking trading schedule…</span>
   </div>
 
@@ -734,7 +756,7 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   </div>
 
   <p id="math-quote" class="mb-5 text-sm font-bold"
-     style="color:var(--accent);font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:-.03em;line-height:1;transition:opacity .6s ease;"></p>
+     style="color:var(--accent-muted);font-family:'JetBrains Mono','Consolas',monospace;letter-spacing:-.03em;line-height:1;transition:opacity .6s ease;"></p>
   <script>
   (function(){
     var q=[
@@ -1335,13 +1357,35 @@ setInterval(() => {
 // WEBSOCKET
 // ═══════════════════════════════════════════════════════════════════
 const connDot = document.getElementById('conn-dot');
+const connLabel = document.getElementById('conn-label');
+const connStatus = document.getElementById('conn-status');
+const _CONN_DOT_BASE = 'w-2.5 h-2.5 rounded-full inline-block flex-shrink-0';
+
+function _setConnStatus(state) {
+  if (!connDot || !connLabel) return;
+  if (state === 'live') {
+    connDot.className = _CONN_DOT_BASE + ' conn-dot-on';
+    connLabel.textContent = 'Live';
+    if (connStatus) connStatus.className = 'conn-status live';
+  } else if (state === 'reconnecting') {
+    connDot.className = _CONN_DOT_BASE + ' bg-red-500';
+    connLabel.textContent = 'Reconnecting…';
+    if (connStatus) connStatus.className = 'conn-status off';
+  } else {
+    connDot.className = _CONN_DOT_BASE + ' bg-zinc-600';
+    connLabel.textContent = 'Connecting…';
+    if (connStatus) connStatus.className = 'conn-status';
+  }
+}
+
 let ws;
 function connect() {
+  _setConnStatus('connecting');
   const proto = location.protocol==='https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen  = () => connDot.className = 'w-2.5 h-2.5 rounded-full inline-block conn-dot-on';
+  ws.onopen  = () => _setConnStatus('live');
   ws.onclose = () => {
-    connDot.className = 'w-2.5 h-2.5 rounded-full bg-red-500 inline-block';
+    _setConnStatus('reconnecting');
     setTimeout(connect, 2500);
   };
   ws.onerror = () => ws.close();
@@ -1585,7 +1629,7 @@ function renderProfileStats(bots, g) {
       winEl.className = 'ps-stat-val neu';
     } else {
       winEl.textContent = '+$' + _fmtMoney(biggestWin);
-      winEl.className = 'ps-stat-val pos';
+      winEl.className = 'ps-stat-val win';
     }
   }
 
@@ -1619,10 +1663,10 @@ function renderGlobalStats(g) {
     if (allowed && !inCd) {
       banner.className = BANNER_BASE;
       banner.style.background = 'var(--accent-glow)';
-      banner.style.color = 'var(--accent)';
-      banner.style.borderColor = 'var(--accent-border)';
+      banner.style.color = 'var(--accent-muted)';
+      banner.style.borderColor = 'var(--accent-border-soft)';
       dot.className = DOT_BASE;
-      dot.style.background = 'var(--accent)';
+      dot.style.background = 'var(--accent-muted)';
       schedTxt.textContent =
         `✅ Trading ACTIVE — new entries permitted (${tz})`;
     } else if (!allowed) {
