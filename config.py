@@ -158,6 +158,11 @@ class WorkerConfig:
     dry_run_fill_delay_max_ms: int = 2500
     listener_activate_secs: int = 300
     entry_seconds_left: int = 300
+    min_entry_seconds_left: int = 45
+    min_rebalance_seconds_left: int = 20
+    spread_fill_timeout_ms: int = 10000
+    spread_fill_poll_ms: int = 400
+    spread_imbalance_epsilon: float = 0.05
     enabled: bool = True
 
     @property
@@ -296,6 +301,42 @@ def _merge_worker_entry(raw: dict, defaults: dict) -> WorkerConfig:
     else:
         entry_secs = interval
 
+    min_entry_raw = raw.get("min_entry_seconds_left", defaults.get("min_entry_seconds_left"))
+    min_rebal_raw = raw.get("min_rebalance_seconds_left", defaults.get("min_rebalance_seconds_left"))
+    fill_timeout_raw = raw.get("spread_fill_timeout_ms", defaults.get("spread_fill_timeout_ms"))
+    fill_poll_raw = raw.get("spread_fill_poll_ms", defaults.get("spread_fill_poll_ms"))
+    imb_eps_raw = raw.get("spread_imbalance_epsilon", defaults.get("spread_imbalance_epsilon"))
+
+    min_entry_secs = int(min_entry_raw if min_entry_raw is not None else 45)
+    min_rebal_secs = int(min_rebal_raw if min_rebal_raw is not None else 20)
+    fill_timeout_ms = _parse_cooldown_ms(
+        "spread_fill_timeout_ms",
+        fill_timeout_raw,
+        int(defaults.get("spread_fill_timeout_ms", 10000)),
+    )
+    fill_poll_ms = _parse_cooldown_ms(
+        "spread_fill_poll_ms",
+        fill_poll_raw,
+        int(defaults.get("spread_fill_poll_ms", 400)),
+    )
+    imb_epsilon = _parse_spread_threshold(
+        "spread_imbalance_epsilon",
+        imb_eps_raw,
+        float(defaults.get("spread_imbalance_epsilon", 0.05)),
+    )
+
+    if min_entry_secs < 0:
+        _fatal(f"{asset}:{window}: min_entry_seconds_left must be >= 0")
+    if min_rebal_secs < 0:
+        _fatal(f"{asset}:{window}: min_rebalance_seconds_left must be >= 0")
+    if min_rebal_secs > min_entry_secs:
+        _fatal(
+            f"{asset}:{window}: min_rebalance_seconds_left ({min_rebal_secs}) "
+            f"cannot exceed min_entry_seconds_left ({min_entry_secs})"
+        )
+    if fill_poll_ms > fill_timeout_ms:
+        _fatal(f"{asset}:{window}: spread_fill_poll_ms must be <= spread_fill_timeout_ms")
+
     enabled = raw.get("enabled", True)
     if not isinstance(enabled, bool):
         enabled = str(enabled).lower() in ("1", "true", "yes", "on")
@@ -315,6 +356,11 @@ def _merge_worker_entry(raw: dict, defaults: dict) -> WorkerConfig:
         dry_run_fill_delay_max_ms=dry_max,
         listener_activate_secs=listener_secs,
         entry_seconds_left=entry_secs,
+        min_entry_seconds_left=min_entry_secs,
+        min_rebalance_seconds_left=min_rebal_secs,
+        spread_fill_timeout_ms=fill_timeout_ms,
+        spread_fill_poll_ms=fill_poll_ms,
+        spread_imbalance_epsilon=imb_epsilon,
         enabled=enabled,
     )
 

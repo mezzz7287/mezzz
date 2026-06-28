@@ -10,7 +10,12 @@
     "dry_run_fill_delay_min_ms": 200,
     "dry_run_fill_delay_max_ms": 2500,
     "listener_activate_secs": null,
-    "entry_seconds_left": null
+    "entry_seconds_left": null,
+    "min_entry_seconds_left": 45,
+    "min_rebalance_seconds_left": 20,
+    "spread_fill_timeout_ms": 10000,
+    "spread_fill_poll_ms": 400,
+    "spread_imbalance_epsilon": 0.05
   },
   "workers": [
     { "asset": "btc", "window": "5m", "enabled": true },

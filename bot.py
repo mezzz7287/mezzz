@@ -51,6 +51,16 @@ from config import (
 from strategies.base import SpreadDecision
 from strategies.spread_capture import SpreadCaptureStrategy
 from utils.spread_inventory import SpreadInventory
+from utils.spread_risk import (
+    compute_spread_edge,
+    dual_both_filled,
+    dual_limit_edge,
+    dual_one_legged,
+    edge_meets_threshold,
+    is_order_fully_filled,
+    spread_entry_window_ok,
+    spread_rebalance_window_ok,
+)
 from utils.clob_helpers import clamp_buy_price, clamp_sell_price, parse_order_type
 
 console = Console()
@@ -2298,6 +2308,7 @@ class MarketWorker:
         self.spread_state: SpreadState = SpreadState.IDLE
         self.spread_inventory = SpreadInventory()
         self.spread_captures = 0
+        self._open_spread_orders: Dict[str, Tuple[str, float, float]] = {}
 
         self.last_yes_update = 0.0
         self.last_no_update  = 0.0
@@ -2470,6 +2481,165 @@ class MarketWorker:
     def is_dry_run(self) -> bool:
         return self.worker_config.dry_run
 
+    def market_seconds_left(self) -> int:
+        if not self.active_market:
+            return 0
+        remaining = self.active_market["expiry"] - datetime.now(timezone.utc)
+        return max(0, int(remaining.total_seconds()))
+
+    def spread_bid(self, side: str) -> float:
+        """Real best bid only — never synthesize from the ask."""
+        return self.bids.get(side, 0.0)
+
+    def current_spread_edge(self) -> Optional[float]:
+        return compute_spread_edge(
+            self.spread_bid("YES"),
+            self.spread_bid("NO"),
+            is_locked=is_locked_price,
+        )
+
+    def can_spread_dual(self) -> bool:
+        wc = self.worker_config
+        return spread_entry_window_ok(
+            self.market_seconds_left(),
+            entry_seconds_left=wc.entry_seconds_left,
+            min_entry_seconds_left=wc.min_entry_seconds_left,
+        )
+
+    def can_spread_rebalance(self) -> bool:
+        return spread_rebalance_window_ok(
+            self.market_seconds_left(),
+            min_rebalance_seconds_left=self.worker_config.min_rebalance_seconds_left,
+        )
+
+    def validate_spread_execution_edge(
+        self, decision: SpreadDecision, legs: List[Tuple[str, float]],
+    ) -> bool:
+        wc = self.worker_config
+        if decision.mode != "dual":
+            return True
+        yes_px = next((p for s, p in legs if s == "YES"), 0.0)
+        no_px = next((p for s, p in legs if s == "NO"), 0.0)
+        if yes_px <= 0 or no_px <= 0:
+            return False
+        if is_locked_price(yes_px) or is_locked_price(no_px):
+            return False
+        edge = dual_limit_edge(yes_px, no_px)
+        if not edge_meets_threshold(edge, wc.spread_threshold):
+            print(
+                f"❌ [SPREAD ABORT] {self.asset_type.upper()} {self.window_slug} | "
+                f"execution edge={edge:.4f} <= threshold={wc.spread_threshold:.4f}"
+            )
+            return False
+        return True
+
+    def _track_spread_order(self, order_id: Optional[str], side: str, size: float, price: float) -> None:
+        if order_id and order_id not in ("dry-run", None):
+            self._open_spread_orders[order_id] = (side, size, price)
+
+    def _untrack_spread_order(self, order_id: Optional[str]) -> None:
+        if order_id:
+            self._open_spread_orders.pop(order_id, None)
+
+    async def cancel_spread_order_confirmed(
+        self, order_id: str, requested: float, limit_price: float,
+    ) -> Tuple[float, float]:
+        """Cancel a resting order and return any final matched size/price."""
+        if order_id in ("dry-run", None):
+            return 0.0, round(limit_price, 4)
+
+        fill_size = 0.0
+        fill_price = round(limit_price, 4)
+        self._try_cancel_order(order_id)
+
+        deadline = t.time() + 2.0
+        while t.time() < deadline:
+            await asyncio.sleep(0.35)
+            fill_size, fill_price = await self.poll_order_fill(
+                order_id, requested, limit_price,
+            )
+            try:
+                info = self.account.get_order_status(order_id)
+                if isinstance(info, str):
+                    info = json.loads(info)
+                if isinstance(info, dict):
+                    status = str(info.get("status", "")).lower()
+                    if status in ("cancelled", "canceled"):
+                        break
+                    if is_order_fully_filled(requested, fill_size, MIN_FILL_DELTA):
+                        break
+            except Exception:
+                if fill_size > 0:
+                    break
+
+        self._untrack_spread_order(order_id)
+        return fill_size, fill_price
+
+    async def cancel_all_open_spread_orders(self) -> None:
+        for order_id, (side, size, price) in list(self._open_spread_orders.items()):
+            print(
+                f"🚫 [SPREAD CLEANUP] Cancelling open {side} order {order_id} "
+                f"({size:.2f}@{round(price*100)}c)"
+            )
+            await self.cancel_spread_order_confirmed(order_id, size, price)
+        self._open_spread_orders.clear()
+
+    async def unwind_spread_leg(self, side: str, size: float, entry_price: float) -> bool:
+        """Sell back a one-legged fill at the best bid to eliminate directional risk."""
+        for attempt in range(3):
+            bid = self.spread_bid(side)
+            if bid <= 0 or is_locked_price(bid):
+                await asyncio.sleep(0.25)
+                continue
+
+            sell_price = round(bid, 2)
+            if self.is_dry_run():
+                print(
+                    f"🧪 [DRY UNWIND] SELL {size:.2f} {side} @ {round(sell_price*100)}c "
+                    f"(was {round(entry_price*100)}c)"
+                )
+                exec_log(
+                    "spread_unwind_dry", side=side, size=size,
+                    sell_price=sell_price, entry_price=entry_price,
+                    asset=self.asset_type, window=self.window_slug,
+                )
+                return True
+
+            fill_size, fill_price = await self.place_spread_sell(side, sell_price, size)
+            if fill_size > MIN_FILL_DELTA:
+                pnl = round((fill_price - entry_price) * fill_size, 4)
+                print(
+                    f"↩️ [UNWIND] Sold {fill_size:.2f} {side} @ {round(fill_price*100)}c "
+                    f"(entry {round(entry_price*100)}c, pnl ${pnl:+.4f})"
+                )
+                exec_log(
+                    "spread_unwind", side=side, size=fill_size,
+                    sell_price=fill_price, entry_price=entry_price, pnl=pnl,
+                    asset=self.asset_type, window=self.window_slug,
+                )
+                return True
+            await asyncio.sleep(0.35)
+
+        print(
+            f"⚠️ [UNWIND FAIL] {self.asset_type.upper()} {self.window_slug} | "
+            f"could not sell {size:.2f} {side} after 3 attempts"
+        )
+        return False
+
+    async def place_spread_sell(
+        self, side: str, price: float, size: float,
+    ) -> Tuple[float, float]:
+        """FOK sell at limit price; returns (filled_size, fill_price)."""
+        ok, order_id, _filled = await self.place_order_raw(
+            side, price, size, order_type="FOK", action="SELL",
+        )
+        if not ok or not order_id:
+            return 0.0, round(price, 4)
+        if order_id == "dry-run":
+            return float(size), round(price, 4)
+        fill_size, fill_price = await self.poll_order_fill(order_id, size, price)
+        return fill_size, fill_price
+
     def spread_order_size(self, legs: List[str]) -> Optional[float]:
         """Pick order size (random in configured range) and clamp to headroom."""
         wc = self.worker_config
@@ -2592,6 +2762,8 @@ class MarketWorker:
     ) -> None:
         if not fills:
             return
+        if decision.mode == "dual" and not dual_both_filled(fills, MIN_FILL_DELTA):
+            return
         self.spread_captures += 1
         inv = self.spread_inventory
         mode = "DRY" if dry_run else "LIVE"
@@ -2618,13 +2790,16 @@ class MarketWorker:
         )
         if not ok:
             return None, 0.0
+        if order_id:
+            self._track_spread_order(order_id, side, float(size), price)
         if filled and order_id:
+            self._untrack_spread_order(order_id)
             return order_id, float(size)
         return order_id, 0.0
 
     def effective_bid(self, side: str) -> float:
-        """Best bid for spread orders; fall back to ask minus bias when bid is stale."""
-        bid = self.bids.get(side, 0.0)
+        """Best bid for rebalance pricing; falls back to ask minus bias when bid missing."""
+        bid = self.spread_bid(side)
         if bid > 0:
             return bid
         ask = self.prices.get(side, 0.0)
@@ -2634,19 +2809,25 @@ class MarketWorker:
 
     def resolve_spread_execution_legs(self, decision: SpreadDecision) -> List[Tuple[str, float]]:
         """Re-read live bids at execution time so fills match the triggering prices."""
-        up_bid = self.effective_bid("YES")
-        down_bid = self.effective_bid("NO")
+        up_bid = self.spread_bid("YES")
+        down_bid = self.spread_bid("NO")
         if decision.mode == "dual":
+            if up_bid <= 0 or down_bid <= 0:
+                return []
+            if is_locked_price(up_bid) or is_locked_price(down_bid):
+                return []
             return [("YES", round(up_bid, 2)), ("NO", round(down_bid, 2))]
+        eff_yes = self.effective_bid("YES")
+        eff_no = self.effective_bid("NO")
         if decision.rebalance_side == "YES":
             reb = self._spread_rebalance_decision(
-                underweight="YES", up_bid=up_bid, down_bid=down_bid,
+                underweight="YES", up_bid=eff_yes, down_bid=eff_no,
                 edge=decision.edge, size=decision.size,
             )
             return [("YES", reb.yes_price)]
         if decision.rebalance_side == "NO":
             reb = self._spread_rebalance_decision(
-                underweight="NO", up_bid=up_bid, down_bid=down_bid,
+                underweight="NO", up_bid=eff_yes, down_bid=eff_no,
                 edge=decision.edge, size=decision.size,
             )
             return [("NO", reb.no_price)]
@@ -2886,8 +3067,8 @@ class MarketWorker:
                     seconds_left = int(remaining.total_seconds())
                     if seconds_left <= 0:
                         print("\n⌛ Market expired. Closing listener...")
-                        await asyncio.sleep(3)
-                        self.print_final_summary()
+                        await asyncio.sleep(1)
+                        await self.on_market_expired()
                         await ws.close()
                         return
                     mins, secs = divmod(seconds_left, 60)
@@ -2991,6 +3172,10 @@ class MarketWorker:
 
         decision = await self.strategy.evaluate(self)
         if decision:
+            if decision.mode == "dual" and not self.can_spread_dual():
+                return
+            if decision.mode == "rebalance" and not self.can_spread_rebalance():
+                return
             mode = decision.mode.upper()
             print(
                 f"[SPREAD] {self.asset_type.upper()} {self.window_slug} | "
@@ -3022,6 +3207,7 @@ class MarketWorker:
         size: float,
         *,
         order_type: str = "GTC",
+        action: str = "BUY",
     ) -> Tuple[bool, Optional[str], bool]:
         """Submit one order; return (accepted, order_id, filled_immediately)."""
         if not self.active_market:
@@ -3029,24 +3215,27 @@ class MarketWorker:
 
         token_id = (self.active_market["yes_id"] if side == "YES"
                     else self.active_market["no_id"])
-        clean_price = max(0.01, min(0.99, round(price, 2)))
+        if action.upper() == "SELL":
+            clean_price = clamp_sell_price(price)
+        else:
+            clean_price = clamp_buy_price(price)
 
-        if not self.validate_spread_order_size(side, float(size)):
+        if action.upper() == "BUY" and not self.validate_spread_order_size(side, float(size)):
             return False, None, False
 
         if self.is_dry_run():
-            print(f"\n🧪 [DRY] BUY {size} {side} @ {round(clean_price*100)}c "
+            print(f"\n🧪 [DRY] {action} {size} {side} @ {round(clean_price*100)}c "
                   f"mode={order_type}")
-            exec_log("dry_run_order", side=side, price=clean_price, size=size,
+            exec_log("dry_run_order", action=action, side=side, price=clean_price, size=size,
                      order_type=order_type, window=self.window_slug)
             return True, "dry-run", True
 
         try:
             resp = self.account.create_and_post_order(
-                "BUY", clean_price, float(size), token_id, order_type=order_type,
+                action.upper(), clean_price, float(size), token_id, order_type=order_type,
             )
         except Exception as e:
-            exec_log("order_failed", side=side, error=str(e), order_type=order_type)
+            exec_log("order_failed", action=action, side=side, error=str(e), order_type=order_type)
             print(f"❌ Order placement failed: {e}")
             return False, None, False
 
@@ -3073,7 +3262,7 @@ class MarketWorker:
             except Exception:
                 pass
 
-        exec_log("order_submit", side=side, price=clean_price, size=size,
+        exec_log("order_submit", action=action, side=side, price=clean_price, size=size,
                  order_type=order_type, order_id=order_id, filled=filled)
         return True, order_id, filled
 
@@ -3185,6 +3374,7 @@ class MarketWorker:
         self.spread_state = SpreadState.IDLE
         self.spread_inventory.reset()
         self.spread_captures = 0
+        self._open_spread_orders.clear()
         self.recent_logs.clear()
         self.update_dashboard()
         print("\n♻️ Full state reset after trade/exit. Ready for next market.")
@@ -3381,7 +3571,40 @@ class MarketWorker:
             "entries_blocked_cooldown": cd.get("entries_blocked_cooldown", False),
         }
 
+    async def on_market_expired(self) -> None:
+        """Cancel open orders, merge matched pairs, and settle spread inventory."""
+        await self.cancel_all_open_spread_orders()
+
+        self.final_yes_price = self.prices.get("YES", 0.0)
+        self.final_no_price  = self.prices.get("NO",  0.0)
+        if self.final_yes_price > FINAL_PRICE:
+            self.market_outcome = "YES"
+        elif self.final_no_price > FINAL_PRICE:
+            self.market_outcome = "NO"
+        else:
+            self.market_outcome = "UNKNOWN"
+        self.dashboard["outcome"] = self.market_outcome
+
+        inv = self.spread_inventory
+        eps = self.worker_config.spread_imbalance_epsilon
+        if abs(inv.imbalance) > eps:
+            print(
+                f"\n{BOLD}{YELLOW}⚠️  [SPREAD RISK] Expiring with imbalanced inventory: "
+                f"Y={inv.yes_shares:.2f} N={inv.no_shares:.2f} "
+                f"(imbalance={inv.imbalance:+.2f}){RESET}"
+            )
+
+        matched = inv.matched_pairs
+        if matched > MIN_FILL_DELTA:
+            if self.is_dry_run():
+                print(f"🧪 [DRY] Would merge {matched:.2f} matched YES+NO pairs on-chain")
+            else:
+                await self.merge_shares(matched)
+
+        self._settle_spread_market()
+
     def print_final_summary(self):
+        """Backward-compatible sync wrapper — prefer on_market_expired in async paths."""
         self.final_yes_price = self.prices.get("YES", 0.0)
         self.final_no_price  = self.prices.get("NO",  0.0)
         if self.final_yes_price > FINAL_PRICE:
@@ -3521,7 +3744,11 @@ class MarketWorker:
             order_size_label = f"{wc.spread_size_max} shares (max order {wc.max_order_size})"
         print(f"  Order size        : {order_size_label}")
         print(f"  Max inventory     : {wc.max_shares} shares per leg")
-        print(f"  Cooldown          : {wc.trade_cooldown_ms}ms after dual leg")
+        print(f"  Entry window      : {wc.min_entry_seconds_left}s < t <= {wc.entry_seconds_left}s")
+        print(f"  Rebalance cutoff  : t > {wc.min_rebalance_seconds_left}s")
+        print(f"  Fill monitor      : {wc.spread_fill_timeout_ms}ms timeout / "
+              f"{wc.spread_fill_poll_ms}ms poll")
+        print(f"  Leg cooldown      : {wc.trade_cooldown_ms}ms before one-leg cancel")
         if self.is_dry_run():
             print(f"  Dry-run fill delay: {wc.dry_run_fill_delay_min_ms}-"
                   f"{wc.dry_run_fill_delay_max_ms}ms per leg")
