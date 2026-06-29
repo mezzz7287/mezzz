@@ -20,7 +20,7 @@ from collections import deque
 from zoneinfo import ZoneInfo
 
 from py_clob_client_v2.client import ClobClient
-from py_clob_client_v2.clob_types import OrderArgs, OrderPayload, OrderType, ApiCreds
+from py_clob_client_v2.clob_types import OrderArgs, OrderPayload, OrderType, ApiCreds, AssetType, BalanceAllowanceParams
 from py_clob_client_v2.order_builder.constants import BUY, SELL
 from py_clob_client_v2 import Side, SignatureTypeV2
 
@@ -86,6 +86,13 @@ def exec_log(event: str, **kwargs):
 DRY_MODE = DRY_RUN_DEFAULT
 LOG_FILE  = "emiliano_trades.txt"
 
+
+def live_on_chain_setup_required() -> bool:
+    """True when any enabled worker will place real on-chain orders."""
+    if DRY_MODE:
+        return False
+    return any(wc.enabled and not wc.dry_run for wc in WORKER_CONFIGS)
+
 HOST        = "https://clob.polymarket.com"
 WS_URL      = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 GAMMA_URL   = "https://gamma-api.polymarket.com/markets"
@@ -98,6 +105,81 @@ CTF_EXCHANGE      = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
 NEG_RISK_EXCHANGE = "0xC5d563A36AE78145C45a50134d48A1215220f80a"
 STANDARD_EXCHANGE = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E"
 NEG_RISK_ADAPTER  = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
+
+_HEX_RE = re.compile(r"^(0x)?[0-9a-fA-F]+$")
+
+
+def _hex_nibbles(value: str) -> str:
+    v = value.strip()
+    return v[2:] if v.lower().startswith("0x") else v
+
+
+def _validate_private_key_env(name: str, value: str) -> str:
+    v = value.strip()
+    body = _hex_nibbles(v)
+    if not _HEX_RE.match(v):
+        raise ValueError(f"{name} must be a hex private key (0x + 64 hex characters).")
+    if len(body) != 64:
+        raise ValueError(
+            f"{name} must be 0x followed by 64 hex characters (got {len(body)}). "
+            f"Did you paste a wallet address instead of a private key?"
+        )
+    return v if v.lower().startswith("0x") else f"0x{body}"
+
+
+def _validate_wallet_address_env(name: str, value: str) -> str:
+    v = value.strip()
+    body = _hex_nibbles(v)
+    if not _HEX_RE.match(v):
+        raise ValueError(f"{name} must be a hex Ethereum address.")
+    if len(body) == 64:
+        raise ValueError(
+            f"{name} looks like a private key (64 hex chars). "
+            "Use your Polymarket wallet public address here (0x + 40 hex chars). "
+            "In Polymarket: profile / deposit → copy wallet address, not your key."
+        )
+    if len(body) != 40:
+        raise ValueError(
+            f"{name} must be 0x followed by 40 hex characters "
+            f"(got {len(body)})."
+        )
+    prefixed = v if v.lower().startswith("0x") else f"0x{body}"
+    return Web3.to_checksum_address(prefixed)
+
+
+def _resolve_polymarket_signature_type(signer: str, funder: str) -> int:
+    """
+    Pick CLOB signature_type for order signing.
+
+    New Polymarket accounts use deposit wallets and require POLY_1271 (3).
+    Legacy proxy/Safe accounts use 1 or 2 — set POLY_SIGNATURE_TYPE in .env.
+
+    Defaults (POLY_WALLET_MODE=auto or unset):
+      0 (EOA)        — funder and signer are the same wallet
+      3 (POLY_1271)  — funder != signer (deposit wallet / new accounts)
+
+    Override with POLY_SIGNATURE_TYPE=1 for legacy Polymarket proxy wallets.
+    """
+    override = os.getenv("POLY_SIGNATURE_TYPE", "").strip()
+    if override:
+        return int(override)
+
+    wallet_mode = os.getenv("POLY_WALLET_MODE", "auto").strip().lower()
+    if signer.lower() == funder.lower():
+        return int(SignatureTypeV2.EOA)
+
+    if wallet_mode == "legacy":
+        return int(SignatureTypeV2.POLY_PROXY)
+    # auto / deposit — required for "use the deposit wallet flow" accounts
+    return int(SignatureTypeV2.POLY_1271)
+
+
+_SIGNATURE_TYPE_LABELS = {
+    int(SignatureTypeV2.EOA): "EOA (0)",
+    int(SignatureTypeV2.POLY_PROXY): "POLY_PROXY (1)",
+    int(SignatureTypeV2.POLY_GNOSIS_SAFE): "POLY_GNOSIS_SAFE (2)",
+    int(SignatureTypeV2.POLY_1271): "POLY_1271 (3 — smart contract signer)",
+}
 
 BOLD   = "\033[1m"
 GREEN  = "\033[92m"
@@ -1920,21 +2002,27 @@ class BinanceDepthSignal:
 
 class AccountService:
     def __init__(self):
-        pk     = os.getenv("PRIVATE_KEY")
-        funder = os.getenv("FUNDER_ADDRESS")
-        if not pk or not funder:
+        pk_raw     = os.getenv("PRIVATE_KEY")
+        funder_raw = os.getenv("FUNDER_ADDRESS")
+        if not pk_raw or not funder_raw:
             raise ValueError("Missing PRIVATE_KEY or FUNDER_ADDRESS in .env")
 
+        pk     = _validate_private_key_env("PRIVATE_KEY", pk_raw)
+        funder = _validate_wallet_address_env("FUNDER_ADDRESS", funder_raw)
+
         self.w3             = Web3(Web3.HTTPProvider(POLYGON_RPC))
-        self.wallet_address = self.w3.to_checksum_address(funder)
+        self.wallet_address = funder
         self.signer_address = self.w3.eth.account.from_key(pk).address
         self.private_key    = pk
+        sig_type = _resolve_polymarket_signature_type(self.signer_address, funder)
+        self.signature_type = sig_type
 
         print(f"Signer : {self.signer_address}")
         print(f"Funder : {self.wallet_address}")
+        print(f"CLOB signature_type: {_SIGNATURE_TYPE_LABELS.get(sig_type, sig_type)}")
 
         _l1_client = ClobClient(
-            host=HOST, key=pk, chain_id=137, funder=funder, signature_type=3  # type: ignore
+            host=HOST, key=pk, chain_id=137, funder=funder, signature_type=sig_type  # type: ignore
         )
 
         print("🔑 Authenticating with Polymarket (V2)...")
@@ -1953,13 +2041,44 @@ class AccountService:
         # for the whole process, regardless of how many assets are tracked.
         self.client = ClobClient(
             host=HOST, key=pk, chain_id=137, funder=funder,
-            signature_type=3, creds=raw_creds,  # type: ignore
+            signature_type=sig_type, creds=raw_creds,  # type: ignore
         )
+
+        if sig_type == int(SignatureTypeV2.POLY_1271):
+            self._verify_deposit_wallet_deployed()
+            self._sync_clob_collateral_balance()
 
         # Guards so audit/init work can never accidentally run twice even if
         # something calls these methods more than once.
         self._audited = False
         self._merge_task: Optional[asyncio.Task] = None
+
+    def _verify_deposit_wallet_deployed(self) -> None:
+        """Warn when the funder address has no on-chain contract code."""
+        try:
+            code = self.w3.eth.get_code(self.wallet_address)
+            if not code or code in (b"", b"\x00"):
+                print(
+                    f"\n{YELLOW}⚠️  [DEPOSIT WALLET] {self.wallet_address} has no contract "
+                    f"code on Polygon.{RESET}\n"
+                    "   Deploy it first: place one trade on polymarket.com, or use the\n"
+                    "   py-builder-relayer-client deploy_deposit_wallet() flow.\n"
+                    "   Orders will fail until the wallet is deployed."
+                )
+            else:
+                print(f"✅ Deposit wallet contract found at {self.wallet_address}")
+        except Exception as e:
+            print(f"⚠️  Could not verify deposit wallet deployment: {e}")
+
+    def _sync_clob_collateral_balance(self) -> None:
+        """Required for deposit-wallet (POLY_1271) accounts before placing orders."""
+        try:
+            self.client.update_balance_allowance(
+                BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+            )
+            print("✅ CLOB collateral balance/allowance synced (deposit wallet)")
+        except Exception as e:
+            print(f"⚠️  CLOB balance sync failed (non-fatal at init): {e}")
 
     # ── On-chain approvals (account-level — run once for the whole wallet) ──
 
@@ -2003,7 +2122,20 @@ class AccountService:
         balance_wei = self.w3.eth.get_balance(self.wallet_address)
         return float(self.w3.from_wei(balance_wei, 'ether'))
 
-    def check_and_approve_pusd(self, spender_address: str, label: str):
+    def _funder_private_key(self) -> Optional[str]:
+        """Return the key that controls FUNDER_ADDRESS approvals."""
+        funder_pk_raw = os.getenv("FUNDER_PRIVATE_KEY", "").strip()
+        if funder_pk_raw:
+            try:
+                return _validate_private_key_env("FUNDER_PRIVATE_KEY", funder_pk_raw)
+            except ValueError as e:
+                print(f"❌ {e}")
+                return None
+        if self.wallet_address.lower() == self.signer_address.lower():
+            return self.private_key
+        return None
+
+    def check_and_approve_pusd(self, spender_address: str, label: str) -> bool:
         pusd_abi = [
             {"inputs": [{"name": "owner",   "type": "address"}, {"name": "spender", "type": "address"}],
              "name": "allowance", "outputs": [{"name": "", "type": "uint256"}], "type": "function"},
@@ -2015,23 +2147,32 @@ class AccountService:
         spender           = self.w3.to_checksum_address(spender_address)
         current_allowance = pusd_contract.functions.allowance(self.wallet_address, spender).call()
         if current_allowance < 1_000_000:
+            funder_pk = self._funder_private_key()
+            if not funder_pk:
+                print(
+                    f"❌ Cannot approve pUSD for {label}. Set FUNDER_PRIVATE_KEY in .env "
+                    f"(required when FUNDER_ADDRESS differs from the signer)."
+                )
+                return False
             print(f"🔓 [GAS] Approving pUSD for {label}...")
+            tx_from = self.wallet_address
             tx_params = cast(TxParams, {
-                'from':     self.signer_address,
-                'nonce':    self.w3.eth.get_transaction_count(self.signer_address, "pending"),
+                'from':     tx_from,
+                'nonce':    self.w3.eth.get_transaction_count(tx_from, "pending"),
                 'gas':      60000,
                 'gasPrice': int(self.w3.eth.gas_price * 1.2),
                 'chainId':  137,
             })
             raw_tx    = pusd_contract.functions.approve(spender, 2**256 - 1).build_transaction(tx_params)
-            signed_tx = self.w3.eth.account.sign_transaction(raw_tx, os.getenv("FUNDER_PRIVATE_KEY"))
+            signed_tx = self.w3.eth.account.sign_transaction(raw_tx, funder_pk)
             tx_hash   = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction)
             self.w3.eth.wait_for_transaction_receipt(tx_hash, poll_latency=2.0)
             print(f"✅ {label} pUSD: Approved.")
         else:
             print(f"✅ {label} pUSD: Already Approved")
+        return True
 
-    def check_and_approve_shares(self, operator_address: str, label: str):
+    def check_and_approve_shares(self, operator_address: str, label: str) -> bool:
         ctf_abi = [
             {"inputs": [{"name": "account",  "type": "address"}, {"name": "operator", "type": "address"}],
              "name": "isApprovedForAll", "outputs": [{"name": "", "type": "bool"}], "type": "function"},
@@ -2044,13 +2185,17 @@ class AccountService:
         is_approved = ctf_contract.functions.isApprovedForAll(self.wallet_address, operator).call()
         if not is_approved:
             print(f"🔓 [POL TX] Funder granting {label} permission to handle shares...")
-            funder_pk = os.getenv("FUNDER_PRIVATE_KEY")
+            funder_pk = self._funder_private_key()
             if not funder_pk:
-                print(f"❌ Cannot approve {label}. Add FUNDER_PRIVATE_KEY to .env.")
-                return
+                print(
+                    f"❌ Cannot approve {label}. Set FUNDER_PRIVATE_KEY in .env "
+                    f"(required when FUNDER_ADDRESS differs from the signer)."
+                )
+                return False
+            tx_from = self.wallet_address
             tx_params: TxParams = {
-                'from':     self.signer_address,
-                'nonce':    self.w3.eth.get_transaction_count(self.signer_address, "pending"),
+                'from':     tx_from,
+                'nonce':    self.w3.eth.get_transaction_count(tx_from, "pending"),
                 'gas':      120000,
                 'gasPrice': Wei(int(self.w3.eth.gas_price * 1.5)),
                 'chainId':  137,
@@ -2063,6 +2208,7 @@ class AccountService:
             print(f"✅ {label} Shares Enabled.")
         else:
             print(f"✅ {label} Shares: Already Approved")
+        return True
 
     def run_wallet_audit(self) -> bool:
         """
@@ -2094,15 +2240,31 @@ class AccountService:
         print(f"💵 Funder pUSD Balance : {funder_pusd:.2f} pUSD")
         print(f"💵 Funder USDC.e       : {funder_usdce:.2f} USDC.e  (legacy — not used as collateral)")
 
-        if not DRY_MODE:
-            operators = [
-                (STANDARD_EXCHANGE, "Main Exchange"),
-                (NEG_RISK_EXCHANGE, "Neg-Risk Exchange"),
-                (NEG_RISK_ADAPTER,  "Neg-Risk Adapter"),
-            ]
-            for addr, label in operators:
-                self.check_and_approve_pusd(addr, label)
-                self.check_and_approve_shares(addr, label)
+        if live_on_chain_setup_required():
+            if self.signature_type == int(SignatureTypeV2.POLY_1271):
+                # Deposit wallets: approvals are set via relayer WALLET batches,
+                # not direct EOA/funder PK transactions. Sync CLOB state instead.
+                self._verify_deposit_wallet_deployed()
+                self._sync_clob_collateral_balance()
+            else:
+                if not self._funder_private_key():
+                    print(
+                        "\n❌ Live mode requires FUNDER_PRIVATE_KEY in .env when FUNDER_ADDRESS "
+                        "is a proxy wallet (different from PRIVATE_KEY signer).\n"
+                        "   Set DRY_RUN=true to skip on-chain approvals for paper trading, or "
+                        "add FUNDER_PRIVATE_KEY for live trading."
+                    )
+                    return False
+                operators = [
+                    (STANDARD_EXCHANGE, "Main Exchange"),
+                    (NEG_RISK_EXCHANGE, "Neg-Risk Exchange"),
+                    (NEG_RISK_ADAPTER,  "Neg-Risk Adapter"),
+                ]
+                for addr, label in operators:
+                    if not self.check_and_approve_pusd(addr, label):
+                        return False
+                    if not self.check_and_approve_shares(addr, label):
+                        return False
 
         self._audited = True
         return True
@@ -2208,8 +2370,18 @@ class AccountService:
         order_args   = OrderArgs(price=price, size=size, side=side_str, token_id=token_id)
         signed_order = self.client.create_order(order_args)
         ot = parse_order_type(order_type)
-        resp         = self.client.post_order(signed_order, cast(OrderType, ot))
-        return resp
+        try:
+            return self.client.post_order(signed_order, cast(OrderType, ot))
+        except Exception as e:
+            err = str(e).lower()
+            if self.signature_type == int(SignatureTypeV2.POLY_1271) and (
+                "deposit wallet" in err or "api key" in err or "maker address" in err
+            ):
+                print("🔄 Retrying order after CLOB balance sync (deposit wallet)...")
+                self._sync_clob_collateral_balance()
+                signed_order = self.client.create_order(order_args)
+                return self.client.post_order(signed_order, cast(OrderType, ot))
+            raise
 
     def get_order_status(self, order_id: str):
         return self.client.get_order(order_id)

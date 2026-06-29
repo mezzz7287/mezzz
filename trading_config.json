@@ -18,9 +18,6 @@
     "spread_imbalance_epsilon": 0.05
   },
   "workers": [
-    { "asset": "btc", "window": "5m", "enabled": true },
-    { "asset": "eth", "window": "5m", "enabled": true },
-    { "asset": "sol", "window": "5m", "enabled": true },
-    { "asset": "xrp", "window": "5m", "enabled": true }
+    { "asset": "eth", "window": "5m", "enabled": true }
   ]
 }
